@@ -1,4 +1,4 @@
-#Fork of unclecheese dropzone just added SS5 requirement
+#Fork of unclecheese dropzone just added SS6 requirement
 
 # Dropzone for SilverStripe
 #### Upload with sanity.
