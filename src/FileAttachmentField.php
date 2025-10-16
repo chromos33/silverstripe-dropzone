@@ -6,6 +6,7 @@ use SilverStripe\Core\Convert;
 use SilverStripe\Core\Manifest\ModuleLoader;
 use SilverStripe\Core\Manifest\ModuleManifest;
 use SilverStripe\Core\Manifest\ModuleResourceLoader;
+use SilverStripe\Core\Validation\ValidationResult;
 use SilverStripe\Forms\FileField;
 use SilverStripe\ORM\DataObject;
 use SilverStripe\ORM\DataObjectInterface;
@@ -132,8 +133,8 @@ class FileAttachmentField extends FileField
     {
         return preg_replace_callback(
             '/_([a-z])/', function ($c) {
-                return strtoupper($c[1]);
-            }, $str
+            return strtoupper($c[1]);
+        }, $str
         );
     }
 
@@ -149,8 +150,8 @@ class FileAttachmentField extends FileField
 
         return preg_replace_callback(
             '/([A-Z])/', function ($c) {
-                return "_" . strtolower($c[1]);
-            }, $str
+            return "_" . strtolower($c[1]);
+        }, $str
         );
     }
 
@@ -164,8 +165,8 @@ class FileAttachmentField extends FileField
     {
         $bytes = min(
             array(
-            Convert::memstring2bytes(ini_get('post_max_size') ?: '8M'),
-            Convert::memstring2bytes(ini_get('upload_max_filesize') ?: '2M')
+                Convert::memstring2bytes(ini_get('post_max_size') ?: '8M'),
+                Convert::memstring2bytes(ini_get('upload_max_filesize') ?: '2M')
             )
         );
 
@@ -488,54 +489,48 @@ class FileAttachmentField extends FileField
 
     /**
      * Check that the user is submitting the file IDs that they uploaded.
-     *
-     * @return boolean
      */
-    public function validate($validator)
+    public function validate(): ValidationResult
     {
-        $result = true;
+        $this->beforeExtending('updateValidate', function (ValidationResult $result) {
+            // Detect if files have been removed between AJAX uploads and form submission
+            $value = $this->dataValue();
 
-        // Detect if files have been removed between AJAX uploads and form submission
-        $value = $this->dataValue();
+            if ($this->hasInvalidFileID) {
+                // Detected invalid file during 'Form::loadDataFrom'. setValue() may remove the invalid ID
+                // to prevent the CMS from loading something it shouldn't; add an error to the result.
+                $result->addFieldError(
+                    $this->name,
+                    _t(
+                        'FileAttachmentField.VALIDATION',
+                        'Invalid file ID sent.'
+                    ),
+                    "validation"
+                );
+                return; // No need to double-handle below
+            }
 
-        if ($this->hasInvalidFileID) {
-            // If detected invalid file during 'Form::loadDataFrom'
-            // (Below validation isn't triggered as setValue() removes the invalid ID
-            //  to prevent the CMS from loading something it shouldn't, also stops the
-            //  validator from realizing there's an invalid ID.)
-            $validator->validationError(
-                $this->name,
-                _t(
-                    'FileAttachmentField.VALIDATION',
-                    'Invalid file ID sent.'
-                ),
-                "validation"
-            );
-            $result = false;
-        } else if ($value && is_array($value)) {
-            // Prevent a malicious user from inspecting element and changing
-            // one of the <input type="hidden"> fields to use an invalid File ID.
-            $validIDs = $this->getValidFileIDs();
+            if ($value && is_array($value)) {
+                // Prevent a malicious user from changing one of the hidden inputs to an invalid File ID.
+                $validIDs = $this->getValidFileIDs();
 
-            foreach ($value as $id) {
-                if (!isset($validIDs[$id])) {
-                    if ($validator) {
-                        $validator->validationError(
+                foreach ($value as $id) {
+                    if (!isset($validIDs[$id])) {
+                        $result->addFieldError(
                             $this->name,
                             _t(
                                 'FileAttachmentField.VALIDATION',
-                                'Invalid file ID sent %s.',
-                                array('id' => $id)
+                                'Invalid file ID sent {id}.',
+                                ['id' => $id]
                             ),
                             "validation"
                         );
                     }
-                    $result = false;
                 }
             }
-        }
+        });
 
-        return $result;
+        return parent::validate();
     }
 
     /**
@@ -553,7 +548,7 @@ class FileAttachmentField extends FileField
             if ($data->getSchema()->hasOneComponent(get_class($data), $fieldName)) {
                 $id = $data->{$fieldName.'ID'};
                 if ($id) {
-                    $ids[] = $id; 
+                    $ids[] = $id;
                 }
             } else if ($data->getSchema()->hasManyComponent(get_class($data), $fieldName) || $data->getSchema()->manyManyComponent(get_class($data), $fieldName)) {
                 $files = $data->{$fieldName}();
@@ -562,7 +557,7 @@ class FileAttachmentField extends FileField
                         if (!$file->exists()) {
                             continue;
                         }
-                        $ids[] = $file->ID; 
+                        $ids[] = $file->ID;
                     }
                 }
             }
@@ -832,7 +827,7 @@ class FileAttachmentField extends FileField
     {
         return $this->setPermissions(
             array(
-            $perm => $val
+                $perm => $val
             )
         );
     }
@@ -863,7 +858,7 @@ class FileAttachmentField extends FileField
     {
         return Controller::curr() instanceof LeftAndMain;
     }
-    
+
     /**
      * @note   these are user-friendlier versions of internal PHP errors reported back in the ['error'] value of an upload
      * @return string
@@ -872,29 +867,29 @@ class FileAttachmentField extends FileField
     {
         $error_message = "";
         switch($code) {
-        case UPLOAD_ERR_OK:
-            // no error - 0
-            return "";
-          break;
-        case UPLOAD_ERR_INI_SIZE:
-        case UPLOAD_ERR_FORM_SIZE:
-            $error_message = _t('FileAttachmentField.ERRFILESIZE', 'The file is too large, please try again with a smaller version of the file.');
-            break;
-        case UPLOAD_ERR_PARTIAL:
-            $error_message = _t('FileAttachmentField.ERRPARTIALUPLOAD', 'The file was only partially uploaded, did you cancel the upload? Please try again.');
-            break;
-        case UPLOAD_ERR_NO_FILE:
-            $error_message = _t('FileAttachmentField.ERRNOFILE', 'No file upload was detected.');
-            break;
-        case UPLOAD_ERR_NO_TMP_DIR:
-        case UPLOAD_ERR_CANT_WRITE:
-        case UPLOAD_ERR_EXTENSION:
-            $error_message = _t('FileAttachmentField.ERRSYSTEMFAIL', 'Sorry, the system is not allowing file uploads at this time.');
-            break;
-        default:
-            // handles if an extra error value is added at some point as a general error
-            $error_message = _t('FileAttachmentField.ERRUNKNOWNCODE', 'Sorry, an unknown error has occured. Please try again later.');
-            break;
+            case UPLOAD_ERR_OK:
+                // no error - 0
+                return "";
+                break;
+            case UPLOAD_ERR_INI_SIZE:
+            case UPLOAD_ERR_FORM_SIZE:
+                $error_message = _t('FileAttachmentField.ERRFILESIZE', 'The file is too large, please try again with a smaller version of the file.');
+                break;
+            case UPLOAD_ERR_PARTIAL:
+                $error_message = _t('FileAttachmentField.ERRPARTIALUPLOAD', 'The file was only partially uploaded, did you cancel the upload? Please try again.');
+                break;
+            case UPLOAD_ERR_NO_FILE:
+                $error_message = _t('FileAttachmentField.ERRNOFILE', 'No file upload was detected.');
+                break;
+            case UPLOAD_ERR_NO_TMP_DIR:
+            case UPLOAD_ERR_CANT_WRITE:
+            case UPLOAD_ERR_EXTENSION:
+                $error_message = _t('FileAttachmentField.ERRSYSTEMFAIL', 'Sorry, the system is not allowing file uploads at this time.');
+                break;
+            default:
+                // handles if an extra error value is added at some point as a general error
+                $error_message = _t('FileAttachmentField.ERRUNKNOWNCODE', 'Sorry, an unknown error has occured. Please try again later.');
+                break;
         }
         return $error_message;
     }
@@ -915,7 +910,7 @@ class FileAttachmentField extends FileField
      */
     public function upload(HTTPRequest $request)
     {
-      
+
         $name = $this->getSetting('paramName');
         $files = (!empty($_FILES[$name]) ? $_FILES[$name] : array());
         $tmpFiles = array();
@@ -925,14 +920,14 @@ class FileAttachmentField extends FileField
             $error_message = _t('FileAttachmentField.UPLOADFORBIDDEN', 'Files cannot be uploaded via this form at the current time.');
             return $this->httpError(403, $error_message);
         }
-        
+
         // No files detected in the upload, this can occur if post_max_size is < the upload size
         $value = $request->postVar($name);
         if(empty($files) || empty($value)) {
             $error_message = _t('FileAttachmentField.NOFILESUPLOADED', 'No files were detected in your upload. Please try again later.');
             return $this->httpError(400, $error_message);
         }
-        
+
         // Security token check, must go after above check as a low post_max_size can scrub the Security Token name from the request
         $form = $this->getForm();
         if($form) {
@@ -1314,7 +1309,7 @@ class FileAttachmentField extends FileField
 
         if($filename) {
             if($defaultClass == \SilverStripe\Assets\Image::class
-                && $this->config()->upgrade_images 
+                && $this->config()->upgrade_images
                 && !Injector::inst()->get($class) instanceof \SilverStripe\Assets\Image
             ) {
                 $class = Image::class;
@@ -1494,10 +1489,10 @@ class FileAttachmentField extends FileField
         $readonly = clone $this;
         $readonly->setPermissions(
             [
-            'attach' => false,
-            'detach' => false,
-            'upload' => false,
-            'delete' => false
+                'attach' => false,
+                'detach' => false,
+                'upload' => false,
+                'delete' => false
             ]
         );
 
